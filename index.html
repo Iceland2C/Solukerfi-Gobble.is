@@ -980,7 +980,13 @@
                             <span id="total">0 kr</span>
                         </div>
                     </div>
-                    
+
+                    <div class="form-group" style="margin-top: 18px;">
+                        <label>Dagsetning pöntunar</label>
+                        <input type="date" id="saleDate">
+                        <small style="display:block; color:#888; font-size:0.82em; margin-top:4px;">Sjálfgefið dagsins í dag — breyttu til að bakfæra pöntun.</small>
+                    </div>
+
                     <div style="margin-top: 20px; display: flex; gap: 10px;">
                         <button class="btn-success" onclick="completeSale()">✅ Ganga frá</button>
                         <button class="btn-secondary" onclick="clearSale()">🗑️ Hreinsa</button>
@@ -1640,6 +1646,8 @@
             updateStats();
             updateSalesPeopleTable();
             updateInvoicesTable();
+            const saleDateEl = document.getElementById('saleDate');
+            if (saleDateEl && !saleDateEl.value) saleDateEl.value = todayLocalDateString();
         }
 
         // ── GAGNAGEYMSLA með Google Sheets ──────────────────────────────
@@ -2860,7 +2868,7 @@
         }
 
         function removeFromSale(productId) {
-            currentSale = currentSale.splice(currentSale.findIndex(item => item.productId === productId), 1);
+            currentSale.splice(currentSale.findIndex(item => item.productId === productId), 1);
             updateSaleDisplay();
         }
 
@@ -2915,6 +2923,25 @@
             document.getElementById('total').textContent = formatCurrency(total);
         }
 
+        function todayLocalDateString() {
+            const d = new Date();
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+
+        function getSaleDateISO() {
+            const input = document.getElementById('saleDate');
+            const picked = input ? input.value : '';
+            if (!picked) return new Date().toISOString();
+            const now = new Date();
+            const d = new Date(picked + 'T00:00:00');
+            if (isNaN(d.getTime())) return new Date().toISOString();
+            d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+            return d.toISOString();
+        }
+
         function completeSale() {
             if (currentSale.length === 0) {
                 alert('Engar vörur í sölu');
@@ -2924,8 +2951,10 @@
             const customerId = parseInt(document.getElementById('customerSelect').value);
             let customer = null;
             if (customerId) {
-                customer = customers.find(c => c.id === customerId);
+                customer = customers.find(c => Number(c.id) === customerId);
             }
+
+            const saleDateISO = getSaleDateISO();
 
             // Calculate totals
             let subtotal = 0;
@@ -2956,7 +2985,7 @@
             // Create sale record
             const sale = {
                 id: sales.length + 100,
-                date: new Date().toISOString(),
+                date: saleDateISO,
                 items: [...currentSale],
                 subtotal: subtotal,
                 discount: discount,
@@ -2972,7 +3001,7 @@
             // Create accounting entries
             // Debet: Viðskiptakröfur/Reiðufé
             accountingEntries.push({
-                date: new Date().toISOString(),
+                date: saleDateISO,
                 description: `Sala #${sale.id}`,
                 debit: 'Viðskiptakröfur (1500)',
                 credit: '',
@@ -2981,7 +3010,7 @@
 
             // Kredit: Velta
             accountingEntries.push({
-                date: new Date().toISOString(),
+                date: saleDateISO,
                 description: `Sala #${sale.id}`,
                 debit: '',
                 credit: 'Velta (3000)',
@@ -2990,7 +3019,7 @@
 
             // Kredit: VSK
             accountingEntries.push({
-                date: new Date().toISOString(),
+                date: saleDateISO,
                 description: `VSK á sölu #${sale.id}`,
                 debit: '',
                 credit: 'VSK - Útskattur (2500)',
@@ -2999,7 +3028,7 @@
 
             // Debet: Kostnaður seldra vara
             accountingEntries.push({
-                date: new Date().toISOString(),
+                date: saleDateISO,
                 description: `Kostnaður sölu #${sale.id}`,
                 debit: 'Kostnaður seldra vara (4000)',
                 credit: '',
@@ -3008,7 +3037,7 @@
 
             // Kredit: Birgðir
             accountingEntries.push({
-                date: new Date().toISOString(),
+                date: saleDateISO,
                 description: `Birgðalækkun sölu #${sale.id}`,
                 debit: '',
                 credit: 'Birgðir (1400)',
@@ -3023,6 +3052,8 @@
             // Clear current sale
             currentSale = [];
             document.getElementById('customerSelect').value = '';
+            const saleDateEl = document.getElementById('saleDate');
+            if (saleDateEl) saleDateEl.value = todayLocalDateString();
             updateSaleDisplay();
             updateSalesHistory();
             updateProductTable();
@@ -3202,11 +3233,25 @@
                 if (sale) {
                     sale.signature = signatureDataURL;
                     sale.signatureDate = now.toISOString();
+                    const noteEl = document.getElementById('saleNote');
+                    if (noteEl) sale.note = noteEl.value;
                     saveData();
                 }
             }
-            
+
             alert('Undirskrift vistuð! Þú getur nú prentað reikninginn.');
+        }
+
+        function saveSaleNote() {
+            if (!currentSaleId) return;
+            const textarea = document.getElementById('saleNote');
+            if (!textarea) return;
+            const sale = sales.find(s => s.id === currentSaleId);
+            if (!sale) return;
+            const newNote = textarea.value;
+            if ((sale.note || '') === newNote) return;
+            sale.note = newNote;
+            saveData();
         }
 
         function showDeliveryNote(saleOrId) {
@@ -3306,6 +3351,12 @@
                     </div>
                 </div>
 
+                ${sale.note ? `
+                <div style="margin-top: 25px; padding: 14px 18px; border: 1px solid #d0dde5; border-radius: 8px; background: #f8fbfd;">
+                    <div style="font-weight: bold; color: #2e5c71; margin-bottom: 6px;">Athugasemd:</div>
+                    <div style="color: #333; white-space: pre-wrap;">${sale.note}</div>
+                </div>` : ''}
+
                 <div style="margin-top: 30px; text-align: center;">
 
                 </div>
@@ -3316,13 +3367,21 @@
                 </div>
 
                 <div class="signature-container no-print" style="display: ${alreadySigned ? 'none' : 'block'};">
-                    <div class="signature-label">Undirskrift viðskiptavinar:</div>
-                    <canvas id="signaturePad" class="signature-pad" width="300" height="75"></canvas>
-                    <div class="signature-buttons">
-                        <button onclick="clearSignature()" class="btn-secondary">🗑️ Hreinsa undirskrift</button>
-                        <button onclick="saveSignature()" class="btn-success">💾 Vista undirskrift</button>
+                    <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;">
+                        <div style="flex:0 0 auto;">
+                            <div class="signature-label">Undirskrift viðskiptavinar:</div>
+                            <canvas id="signaturePad" class="signature-pad" width="300" height="75"></canvas>
+                            <div class="signature-buttons">
+                                <button onclick="clearSignature()" class="btn-secondary">🗑️ Hreinsa undirskrift</button>
+                                <button onclick="saveSignature()" class="btn-success">💾 Vista undirskrift</button>
+                            </div>
+                            <div id="signatureDate" class="signature-date"></div>
+                        </div>
+                        <div style="flex:1; min-width:260px;">
+                            <div class="signature-label">Athugasemd:</div>
+                            <textarea id="saleNote" rows="4" onblur="saveSaleNote()" placeholder="Skrifaðu athugasemd hér..." style="width:100%; padding:10px 12px; border:1px solid #2e5c71; border-radius:8px; font-family:inherit; font-size:0.95em; resize:vertical; box-sizing:border-box;">${sale.note || ''}</textarea>
+                        </div>
                     </div>
-                    <div id="signatureDate" class="signature-date"></div>
                 </div>
 
                 <div id="savedSignature" style="display: ${sale.signature ? 'block' : 'none'}; margin-top: 30px; border-top: 2px solid #e0e0e0; padding-top: 20px;">
@@ -3509,10 +3568,25 @@
       </table>
     </div>
 
+    ${sale.note ? `
+    <!-- Note -->
+    <div style="border:1px solid #d0dde5; border-radius:8px; padding:14px 18px; margin-bottom:24px; background:#f8fbfd;">
+      <p style="margin:0 0 6px; font-weight:600; color:#2e5c71; font-size:0.9em;">Athugasemd:</p>
+      <p style="margin:0; color:#333; font-size:0.95em; white-space:pre-wrap;">${sale.note}</p>
+    </div>` : ''}
+
     <!-- Notice -->
     <div style="border-radius:6px; padding:14px 18px; margin-bottom:24px; color:#555; font-size:0.95em; text-align:center;">
       Have a nice Gobble day!
     </div>
+
+    ${sale.signature ? `
+    <!-- Signature -->
+    <div style="border:1px solid #d0dde5; border-radius:8px; padding:14px 18px; margin-bottom:24px; background:#f8fbfd;">
+      <p style="margin:0 0 8px; font-weight:600; color:#2e5c71; font-size:0.9em;">Undirskrift viðskiptavinar:</p>
+      <img src="${sale.signature}" alt="Undirskrift" style="max-width:300px; border:1px solid #ddd; border-radius:6px; background:white; display:block;">
+      ${sale.signatureDate ? `<p style="margin:8px 0 0; color:#666; font-size:0.85em;">Undirritað: ${formatDateIcelandic(sale.signatureDate)} ${formatTimeIcelandic(sale.signatureDate)}</p>` : ''}
+    </div>` : ''}
 
     <!-- Footer -->
     <div style="border-top:1px solid #e8e8e8; padding-top:20px; text-align:center; color:#888; font-size:0.88em;">
@@ -3802,7 +3876,8 @@
                 const customerSSN = sale.customer ? sale.customer.ssn : '-';
                 const date = new Date(sale.date);
                 const dateStr = `${date.getDate()}.${date.getMonth() + 1}.${date.getFullYear()}`;
-                
+                const salesIndex = sales.indexOf(sale);
+
                 row.innerHTML = `
                     <td>${customerName}</td>
                     <td>${customerSSN}</td>
@@ -3810,7 +3885,7 @@
                     <td style="text-align: right;">${formatCurrency(sale.total)}</td>
                     <td style="display: flex; gap: 6px;">
                         <button onclick="viewInvoice(${sale.id})" style="padding: 5px 10px; font-size: 0.9em; background: #2e5c71; color: white; border: none; border-radius: 5px; cursor: pointer;">👁️ Skoða</button>
-                        <button onclick="deleteInvoice(${sale.id})" style="padding: 5px 10px; font-size: 0.9em; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer;">🗑️ Eyða</button>
+                        <button onclick="deleteInvoice(${salesIndex})" style="padding: 5px 10px; font-size: 0.9em; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer;">🗑️ Eyða</button>
                     </td>
                 `;
             });
@@ -3820,14 +3895,12 @@
             showDeliveryNote(saleId);
         }
 
-        function deleteInvoice(saleId) {
+        function deleteInvoice(idx) {
             if (!confirm('Ertu viss um að þú viljir eyða þessum reikningi? Þessa aðgerð er ekki hægt að afturkalla.')) return;
-            const idx = sales.findIndex(s => s.id === saleId);
-            if (idx !== -1) {
-                sales.splice(idx, 1);
-                saveData();
-                updateInvoicesTable();
-            }
+            if (idx < 0 || idx >= sales.length) return;
+            sales.splice(idx, 1);
+            saveData();
+            updateInvoicesTable();
         }
 
         // UTILITIES
