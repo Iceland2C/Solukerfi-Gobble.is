@@ -2846,12 +2846,14 @@
             const product = products.find(p => p.id === productId);
             if (!product) return;
 
-            if (product.stock < quantity) {
-                alert(`Ekki nægar birgðir! Aðeins ${product.stock} stk. í boði.`);
+            const existingItem = currentSale.find(item => item.productId === productId);
+            const alreadyInCart = existingItem ? existingItem.quantity : 0;
+
+            if (product.stock < alreadyInCart + quantity) {
+                alert(`Ekki nægar birgðir! Aðeins ${product.stock} stk. í boði${alreadyInCart ? ' (þú ert nú þegar með ' + alreadyInCart + ' stk. í körfunni)' : ''}.`);
                 return;
             }
 
-            const existingItem = currentSale.find(item => item.productId === productId);
             if (existingItem) {
                 existingItem.quantity += quantity;
             } else {
@@ -2984,7 +2986,7 @@
 
             // Create sale record
             const sale = {
-                id: sales.length + 100,
+                id: sales.length ? Math.max(0, ...sales.map(s => Number(s.id) || 0)) + 1 : 100,
                 date: saleDateISO,
                 items: [...currentSale],
                 subtotal: subtotal,
@@ -3420,7 +3422,7 @@
             const filename = `Afhendingarseðill_${customerName}_${dateStr}`;
 
             if (sale.customer && sale.customer.email) {
-                generateAndSendDeliveryPDF(sale, filename);
+                sendDeliveryEmailWithPDF(sale, filename, null);
             } else {
                 const originalTitle = document.title;
                 document.title = filename;
@@ -3482,6 +3484,14 @@
         }
 
         function sendDeliveryEmailWithPDF(sale, filename, pdfBase64) {
+            if (typeof emailjs === 'undefined') {
+                alert('Villa: tölvupóstkerfið (EmailJS) hlóðst ekki inn. Athugaðu nettengingu og reyndu aftur.');
+                return;
+            }
+            if (!sale.customer || !sale.customer.email) {
+                alert('Þessi viðskiptavinur er ekki með skráð netfang — enginn póstur var sendur.');
+                return;
+            }
             emailjs.init("b0-1Dv0gXcKbDqWL8");
 
             // Build HTML rows for items
@@ -3750,14 +3760,21 @@
             showPasswordModal('🔒 Lykilorð til að eyða sölum', function(ok) {
                 if (!ok) return;
                 if (confirm('Ertu viss um að þú viljir eyða öllum sölum á þessari vöru? Þetta mun EKKI endurheimta birgðir.')) {
-                    // Eyða sölum sem innihalda þessa vöru
-                    sales = sales.filter(sale => {
-                        return !sale.items.some(item => item.productId == productId);
-                    });
+                    // Finna sölur sem innihalda þessa vöru og safna reikningsnúmerum þeirra
+                    const deletedIds = new Set(
+                        sales
+                            .filter(sale => sale.items.some(item => item.productId == productId))
+                            .map(sale => sale.id)
+                    );
+
+                    // Eyða sölunum sjálfum
+                    sales = sales.filter(sale => !sale.items.some(item => item.productId == productId));
                     
-                    // Eyða bókfærslum tengdum þessum sölum
+                    // Eyða AÐEINS bókfærslum sem tilheyra þessum eyddu sölum (miðað við "#<númer>")
                     accountingEntries = accountingEntries.filter(entry => {
-                        return !entry.description.includes('á sölu');
+                        const m = (entry.description || '').match(/#(\d+)/);
+                        const entryId = m ? parseInt(m[1], 10) : null;
+                        return entryId === null || !deletedIds.has(entryId);
                     });
                     
                     saveData();
